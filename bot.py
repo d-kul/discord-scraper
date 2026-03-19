@@ -10,7 +10,7 @@ with open("nuh_uh.txt", "r") as file:
 
 load_dotenv()
 TOKEN = os.environ['TOKEN']
-ADMIN_ID = os.environ['ADMIN_ID']
+ADMIN_ID = int(os.environ['ADMIN_ID'])
 
 intents = discord.Intents.default()
 intents.message_content = True
