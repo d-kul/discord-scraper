@@ -2,13 +2,14 @@ import discord
 import os
 import random
 from discord.ext import commands
+from dotenv import load_dotenv
 from scraper import scrape_guild
 
 with open("nuh_uh.txt", "r") as file:
     nuh_uh = file.read().split()
 
+load_dotenv()
 TOKEN = os.environ['TOKEN']
-
 ADMIN_ID = os.environ['ADMIN_ID']
 
 intents = discord.Intents.default()
