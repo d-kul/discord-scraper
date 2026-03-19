@@ -1,4 +1,5 @@
 import discord
+import logging
 import os
 import random
 from discord.ext import commands

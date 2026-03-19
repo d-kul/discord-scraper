@@ -1,8 +1,10 @@
+from aiolimiter import AsyncLimiter
 import discord
 import pandas as pd
 from typing import Union
 
 BUFFER_SIZE = 500
+REQUESTS_PER_SECOND = 50
 MEMBERS_FILENAME = "members.csv"
 CHANNELS_FILENAME = "channels.csv"
 MESSAGES_FILENAME = "messages.csv"
@@ -13,9 +15,10 @@ with open("skip_channels.txt", "r") as file:
 
 async def scrape_guild(guild: discord.Guild):
     print(f"scraping guild {guild} (ID: {guild.id})")
+    limiter = AsyncLimiter(REQUESTS_PER_SECOND, 1)
     await scrape_members(guild)
     channels = {"data": []}
-    await scrape_messages(guild, channels)
+    await scrape_messages(guild, channels, limiter)
     await flush_data(channels, CHANNELS_FILENAME)
     print(f"done     guild {guild} (ID: {guild.id})")
 
@@ -35,11 +38,10 @@ async def scrape_members(guild: discord.Guild):
             "joined_at": member.joined_at,
             "roles": len(member.roles),
         })
-        print(member)
     await flush_data(members, MEMBERS_FILENAME)
     print(f"done     members of {guild} (ID: {guild.id})")
 
-async def scrape_messages(guild: discord.Guild, channels):
+async def scrape_messages(guild: discord.Guild, channels, limiter: AsyncLimiter):
     print(f"scraping messages of {guild} (ID: {guild.id})")
     messages = {
       "data": [],
@@ -56,27 +58,35 @@ async def scrape_messages(guild: discord.Guild, channels):
             "topic": channel.topic if channel.topic is not None else "",
             "nsfw": channel.nsfw
         })
-        await scrape_channel(channel, messages, reactions);
+        await scrape_channel(channel, messages, reactions, limiter);
         await flush_data(messages, MESSAGES_FILENAME)
         await flush_data(reactions, REACTIONS_FILENAME)
     print(f"done     messages of {guild} (ID: {guild.id})")
 
-async def scrape_channel(channel: discord.TextChannel, messages, reactions):
+async def scrape_channel(channel: discord.TextChannel, messages, reactions, limiter: AsyncLimiter):
     if channel.name in skip_channels:
         print(f"skipping #{channel} (ID: {channel.id})")
         return
     print(f"scraping #{channel} (ID: {channel.id})")
+    count = 0
     async for message in channel.history(limit=None):
-        await scrape_message(message, messages, reactions)
+        count += 1
+        await scrape_message(message, messages, reactions, limiter)
+        if count % 100 == 0:
+            await limiter.acquire()
     for thread in channel.threads:
-        await scrape_thread(thread, messages, reactions)
+        await scrape_thread(thread, messages, reactions, limiter)
     print(f"done     #{channel} (ID: {channel.id})")
 
-async def scrape_thread(thread: discord.Thread, messages, reactions):
+async def scrape_thread(thread: discord.Thread, messages, reactions, limiter):
+    count = 0
     async for message in thread.history(limit=None):
-        await scrape_message(message, messages, reactions)
+        count += 1
+        await scrape_message(message, messages, reactions, limiter)
+        if count % 100 == 0:
+            await limiter.acquire()
 
-async def scrape_message(message: discord.Message, messages, reactions):
+async def scrape_message(message: discord.Message, messages, reactions, limiter: AsyncLimiter):
     if not message.content or message.author.bot:
         return
     messages["data"].append({
@@ -99,10 +109,12 @@ async def scrape_message(message: discord.Message, messages, reactions):
         await flush_data(messages, MESSAGES_FILENAME)
 
     for reaction in message.reactions:
+        count = 0
         async for user in reaction.users():
+            count += 1
             await scrape_reaction(message, user, reaction,reactions)
-
-    # TODO: rate limit
+            if count % 100 == 0:
+                await limiter.acquire()
 
 async def scrape_reaction(message: discord.Message, user: Union[discord.Member, discord.User], reaction: discord.Reaction, reactions):
     if user.bot:
