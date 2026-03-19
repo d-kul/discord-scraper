@@ -1,5 +1,6 @@
 import discord
 import pandas as pd
+from typing import Union
 
 BUFFER_SIZE = 500
 MEMBERS_FILENAME = "members.csv"
@@ -103,7 +104,7 @@ async def scrape_message(message: discord.Message, messages, reactions):
 
     # TODO: rate limit
 
-async def scrape_reaction(message: discord.Message, user: discord.Member | discord.User, reaction: discord.Reaction, reactions):
+async def scrape_reaction(message: discord.Message, user: Union[discord.Member, discord.User], reaction: discord.Reaction, reactions):
     if user.bot:
         return
     reactions["data"].append({
