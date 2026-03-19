@@ -1,6 +1,7 @@
-from aiolimiter import AsyncLimiter
 import discord
 import pandas as pd
+import logging
+from aiolimiter import AsyncLimiter
 from typing import Union
 
 BUFFER_SIZE = 500
@@ -10,20 +11,22 @@ CHANNELS_FILENAME = "channels.csv"
 MESSAGES_FILENAME = "messages.csv"
 REACTIONS_FILENAME = "reactions.csv"
 
+logger = logging.getLogger(__name__)
+
 with open("skip_channels.txt", "r") as file:
     skip_channels = set(file.read().split())
 
 async def scrape_guild(guild: discord.Guild):
-    print(f"scraping guild {guild} (ID: {guild.id})")
+    logger.info(f"scraping guild {guild} (ID: {guild.id})")
     limiter = AsyncLimiter(REQUESTS_PER_SECOND, 1)
     await scrape_members(guild)
     channels = {"data": []}
     await scrape_messages(guild, channels, limiter)
     await flush_data(channels, CHANNELS_FILENAME)
-    print(f"done     guild {guild} (ID: {guild.id})")
+    logger.info(f"done scraping guild {guild} (ID: {guild.id})")
 
 async def scrape_members(guild: discord.Guild):
-    print(f"scraping members of {guild} (ID: {guild.id})")
+    logger.info(f"> scraping members")
     members = {
       "data": [],
     }
@@ -39,10 +42,10 @@ async def scrape_members(guild: discord.Guild):
             "roles": len(member.roles),
         })
     await flush_data(members, MEMBERS_FILENAME)
-    print(f"done     members of {guild} (ID: {guild.id})")
+    logger.info(f"> done scraping members")
 
 async def scrape_messages(guild: discord.Guild, channels, limiter: AsyncLimiter):
-    print(f"scraping messages of {guild} (ID: {guild.id})")
+    logger.info(f"> scraping messages")
     messages = {
       "data": [],
       "dtype": {
@@ -61,13 +64,13 @@ async def scrape_messages(guild: discord.Guild, channels, limiter: AsyncLimiter)
         await scrape_channel(channel, messages, reactions, limiter);
         await flush_data(messages, MESSAGES_FILENAME)
         await flush_data(reactions, REACTIONS_FILENAME)
-    print(f"done     messages of {guild} (ID: {guild.id})")
+    logger.info(f"> done scraping messages")
 
 async def scrape_channel(channel: discord.TextChannel, messages, reactions, limiter: AsyncLimiter):
     if channel.name in skip_channels:
-        print(f"skipping #{channel} (ID: {channel.id})")
+        logger.info(f"> > skipping #{channel} (ID: {channel.id})")
         return
-    print(f"scraping #{channel} (ID: {channel.id})")
+    logger.info(f"> > scraping #{channel} (ID: {channel.id})")
     count = 0
     async for message in channel.history(limit=None):
         count += 1
@@ -76,7 +79,7 @@ async def scrape_channel(channel: discord.TextChannel, messages, reactions, limi
             await limiter.acquire()
     for thread in channel.threads:
         await scrape_thread(thread, messages, reactions, limiter)
-    print(f"done     #{channel} (ID: {channel.id})")
+    logger.info(f"> > done scraping #{channel} (ID: {channel.id})")
 
 async def scrape_thread(thread: discord.Thread, messages, reactions, limiter):
     count = 0
@@ -132,7 +135,7 @@ async def flush_data(data, filename):
         return
     header = data.get("header", True)
     df = pd.DataFrame(data["data"]).astype(data.get("dtype", {}))
-    print(f"flushing to {filename}")
+    logger.debug(f"flushing to {filename}")
     df.to_csv(filename, mode='w' if header else 'a', index=False, header=header)
     data["data"] = []
     data["header"] = False
