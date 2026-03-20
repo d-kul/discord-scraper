@@ -117,8 +117,9 @@ async def scrape_messages(guild: discord.Guild, limiter: AsyncLimiter):
             logger.info(f"> done scraping messages")
         except discord.DiscordServerError as e:
             logger.error(e)
-            logger.info(f">restarting in {config.SCRAPER["ERROR_RESTART_SECONDS"]} s")
-            await asyncio.sleep(config.SCRAPER["ERROR_RESTART_SECONDS"])
+            restart_seconds = config.SCRAPER["ERROR_RESTART_SECONDS"]
+            logger.info(f">restarting in {restart_seconds} s")
+            await asyncio.sleep(restart_seconds)
             continue
         break
 
