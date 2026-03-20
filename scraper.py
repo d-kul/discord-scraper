@@ -1,22 +1,14 @@
 import asyncio
+import json
+import logging
+from pathlib import Path
+from typing import Union
+
+from aiolimiter import AsyncLimiter
 import discord
 import pandas as pd
-from pathlib import Path
-import logging
-from aiolimiter import AsyncLimiter
-from typing import Union
-import json
 
-BUFFER_SIZE = 500
-REQUESTS_PER_PERIOD = 1
-PERIOD_SECONDS = 1
-ERROR_RESTART_SECONDS = 10
-
-MEMBERS_FILENAME = "members.csv"
-CHANNELS_FILENAME = "channels.csv"
-MESSAGES_FILENAME = "messages.csv"
-REACTIONS_FILENAME = "reactions.csv"
-CHECKPOINT_FILENAME = "checkpoint.json"
+import config
 
 def get_checkpoint(channel, thread=None):
     if channel not in checkpoint:
@@ -35,23 +27,25 @@ def save_checkpoint(before, channel, thread=None):
         checkpoint[channel]["threads"][thread] = before
     else:
         checkpoint[channel]["before"] = before
-    with open(CHECKPOINT_FILENAME, 'w') as file:
+    with open(config.DATA["CHECKPOINT"], 'w') as file:
         json.dump(checkpoint, file, indent=4, default=str)
 
-if Path(CHECKPOINT_FILENAME).is_file():
-    with open(CHECKPOINT_FILENAME, 'r') as file:
+if Path(config.DATA["CHECKPOINT"]).is_file():
+    with open(config.DATA["CHECKPOINT"], 'r') as file:
         checkpoint = json.load(file)
 else:
     checkpoint = {}
 
-logger = logging.getLogger(__name__)
+with open(config.RESOURCES["SKIP_CHANNELS"], "r") as file:
+    skip_channels = [s.strip() for s in file.read().split("\n")]
+    skip_channels = {s for s in skip_channels if not s.startswith("#") and len(s) != 0}
 
-with open("skip_channels.txt", "r") as file:
-    skip_channels = set(file.read().split())
+logger = logging.getLogger(__name__)
+logger.setLevel(config.LOG_LEVEL)
 
 async def scrape_guild(guild: discord.Guild):
     logger.info(f"scraping guild {guild} (ID: {guild.id})")
-    limiter = AsyncLimiter(REQUESTS_PER_PERIOD, PERIOD_SECONDS)
+    limiter = AsyncLimiter(config.SCRAPER["REQUESTS_PER_PERIOD"], config.SCRAPER["PERIOD_SECONDS"])
     await scrape_members(guild)
     await scrape_channel_data(guild)
     await scrape_messages(guild, limiter)
@@ -71,7 +65,7 @@ async def scrape_members(guild: discord.Guild):
             "joined_at": member.joined_at,
             "roles": len(member.roles),
         })
-    await flush_data(members, MEMBERS_FILENAME)
+    await flush_data(members, config.DATA["MEMBERS"])
     logger.info(f"> done scraping members")
 
 async def scrape_channel_data(guild: discord.Guild):
@@ -103,7 +97,7 @@ async def scrape_channel_data(guild: discord.Guild):
                 "name": thread.name,
                 "nsfw": channel.nsfw
             })
-    await flush_data(channels, CHANNELS_FILENAME)
+    await flush_data(channels, config.DATA["CHANNELS"])
     logger.info(f"> done scraping channel data")
 
 async def scrape_messages(guild: discord.Guild, limiter: AsyncLimiter):
@@ -123,8 +117,8 @@ async def scrape_messages(guild: discord.Guild, limiter: AsyncLimiter):
             logger.info(f"> done scraping messages")
         except discord.DiscordServerError as e:
             logger.error(e)
-            logger.info(f">restarting in {ERROR_RESTART_SECONDS} s")
-            await asyncio.sleep(ERROR_RESTART_SECONDS)
+            logger.info(f">restarting in {config.SCRAPER["ERROR_RESTART_SECONDS"]} s")
+            await asyncio.sleep(config.SCRAPER["ERROR_RESTART_SECONDS"])
             continue
         break
 
@@ -140,8 +134,8 @@ async def scrape_channel(channel: discord.TextChannel, messages, reactions, limi
         await scrape_message(message, messages, reactions, limiter)
         if count % 100 == 0:
             await limiter.acquire()
-    await flush_data(messages, MESSAGES_FILENAME, channel)
-    await flush_data(reactions, REACTIONS_FILENAME)
+    await flush_data(messages, config.DATA["MESSAGES"], channel)
+    await flush_data(reactions, config.DATA["REACTIONS"])
 
     for thread in channel.threads:
         await scrape_thread(thread, messages, reactions, limiter)
@@ -159,8 +153,8 @@ async def scrape_thread(thread: discord.Thread, messages, reactions, limiter):
         await scrape_message(message, messages, reactions, limiter)
         if count % 100 == 0:
             await limiter.acquire()
-    await flush_data(messages, MESSAGES_FILENAME, thread.parent, thread)
-    await flush_data(reactions, REACTIONS_FILENAME)
+    await flush_data(messages, config.DATA["MESSAGES"], thread.parent, thread)
+    await flush_data(reactions, config.DATA["REACTIONS"])
     logger.info(f"> > > done scraping thread {thread} (ID: {thread.id})")
 
 async def scrape_message(message: discord.Message, messages, reactions, limiter: AsyncLimiter):
@@ -199,9 +193,9 @@ async def scrape_message(message: discord.Message, messages, reactions, limiter:
             if count % 100 == 0:
                 await limiter.acquire()
 
-    if len(messages["data"]) >= BUFFER_SIZE:
-        await flush_data(reactions, REACTIONS_FILENAME)
-        await flush_data(messages, MESSAGES_FILENAME, message.channel, message.thread)
+    if len(messages["data"]) >= config.SCRAPER["BUFFER_SIZE"]:
+        await flush_data(reactions, config.DATA["REACTIONS"])
+        await flush_data(messages, config.DATA["MESSAGES"], message.channel, message.thread)
 
 async def scrape_reaction(message: discord.Message, user: Union[discord.Member, discord.User], reaction: discord.Reaction, reactions):
     if user.bot:

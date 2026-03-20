@@ -1,18 +1,16 @@
-import discord
 import logging
 import os
 import random
+
+import discord
 from discord.ext import commands
-from dotenv import load_dotenv
+
+import config
 from scraper import scrape_guild
 
-with open("nuh_uh.txt", "r") as file:
-    nuh_uh = file.read().split()
-
-load_dotenv()
-TOKEN = os.environ['TOKEN']
-ADMIN_ID = int(os.environ['ADMIN_ID'])
-LOG_LEVEL = logging.getLevelName(os.environ.get('LOG_LEVEL', 'INFO'))
+with open(config.RESOURCES["NUH_UH"], "r") as file:
+    nuh_uh = [s.strip() for s in file.read().split("\n")]
+    nuh_uh = [s for s in nuh_uh if not s.startswith("#") and len(s) != 0]
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -20,12 +18,11 @@ intents.members = True
 
 bot = commands.Bot(
         command_prefix=";",
-        proxy=os.environ.get('http_proxy', None),
+        proxy=os.environ.get("http_proxy", None),
         intents=intents)
 
-logger = logging.getLogger('bot')
-logger.setLevel(LOG_LEVEL)
-logging.getLogger('scraper').setLevel(LOG_LEVEL)
+logger = logging.getLogger("bot")
+logger.setLevel(config.LOG_LEVEL)
 
 @bot.hybrid_command(description="Bazinga!")
 async def bazinga(ctx: commands.Context):
@@ -40,7 +37,7 @@ async def nope(ctx: commands.Context):
 @bot.hybrid_command(description="Sync commands.")
 async def sync(ctx: commands.Context):
     logger.info(f"/sync from {ctx.author} in #{ctx.channel}, {ctx.guild}")
-    if ctx.author.id != ADMIN_ID:
+    if ctx.author.id != config.BOT["ADMIN_ID"]:
         await ctx.send(random.choice(nuh_uh), ephemeral=True)
         return
     await bot.tree.sync()
@@ -49,7 +46,7 @@ async def sync(ctx: commands.Context):
 @bot.hybrid_command(description="Scrape the server's content.")
 async def scrape(ctx: commands.Context):
     logger.info(f"/scrape from {ctx.author} in #{ctx.channel}, {ctx.guild}")
-    if ctx.author.id != ADMIN_ID:
+    if ctx.author.id != config.BOT["ADMIN_ID"]:
         await ctx.send(random.choice(nuh_uh), ephemeral=True)
         return
     if ctx.guild is None:
@@ -58,4 +55,4 @@ async def scrape(ctx: commands.Context):
     await ctx.send("Started data scraping.", ephemeral=True)
     await scrape_guild(ctx.guild)
 
-bot.run(TOKEN, root_logger=True)
+bot.run(config.BOT["TOKEN"], root_logger=True)
