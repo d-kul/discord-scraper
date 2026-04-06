@@ -11,22 +11,17 @@ import pandas as pd
 import config
 
 def get_checkpoint(channel, thread=None):
-    if channel not in checkpoint:
-        return None
-    if thread is None:
-        return discord.Object(id=checkpoint[channel]["before"])
-    if thread in checkpoint[channel]["threads"]:
-        return discord.Object(id=checkpoint[channel]["threads"][thread])
-    return None
-
-def save_checkpoint(before, channel, thread=None):
-    global checkpoint
-    if channel not in checkpoint:
-        checkpoint[channel] = {"threads": {}}
+    key = str(channel.id)
     if thread is not None:
-        checkpoint[channel]["threads"][thread] = before
-    else:
-        checkpoint[channel]["before"] = before
+        key += ":" + str(thread.id)
+    return discord.Object(id=checkpoint[key]) if key in checkpoint else None
+
+def save_checkpoint(value, channel, thread=None):
+    global checkpoint
+    key = str(channel.id)
+    if thread is not None:
+        key += ":" + str(thread.id)
+    checkpoint[key] = value
     with open(config.DATA["CHECKPOINT"], 'w') as file:
         json.dump(checkpoint, file, indent=4, default=str)
 
@@ -130,13 +125,18 @@ async def scrape_channel(channel: discord.TextChannel, messages, reactions, limi
     logger.info(f"> > scraping #{channel} (ID: {channel.id})")
 
     count = 0
-    async for message in channel.history(limit=None, before=get_checkpoint(channel.name)):
+    async for message in channel.history(limit=None, after=get_checkpoint(channel)):
         count += 1
         await scrape_message(message, messages, reactions, limiter)
+        if (len(messages["data"]) >= config.SCRAPER["BUFFER_SIZE"] or 
+            len(reactions["data"]) >= config.SCRAPER["BUFFER_SIZE"]):
+            await flush_data(reactions, config.DATA["REACTIONS"])
+            await flush_data(messages, config.DATA["MESSAGES"], channel)
         if count % 100 == 0:
             await limiter.acquire()
-    await flush_data(messages, config.DATA["MESSAGES"], channel)
+            count = 0
     await flush_data(reactions, config.DATA["REACTIONS"])
+    await flush_data(messages, config.DATA["MESSAGES"], channel)
 
     for thread in channel.threads:
         await scrape_thread(thread, messages, reactions, limiter)
@@ -149,13 +149,18 @@ async def scrape_channel(channel: discord.TextChannel, messages, reactions, limi
 async def scrape_thread(thread: discord.Thread, messages, reactions, limiter):
     logger.info(f"> > > scraping thread {thread} (ID: {thread.id})")
     count = 0
-    async for message in thread.history(limit=None, before=get_checkpoint(thread.parent.name, thread.name)):
+    async for message in thread.history(limit=None, after=get_checkpoint(thread.parent, thread)):
         count += 1
         await scrape_message(message, messages, reactions, limiter)
+        if (len(messages["data"]) >= config.SCRAPER["BUFFER_SIZE"] or 
+            len(reactions["data"]) >= config.SCRAPER["BUFFER_SIZE"]):
+            await flush_data(reactions, config.DATA["REACTIONS"])
+            await flush_data(messages, config.DATA["MESSAGES"], thread.parent, thread)
         if count % 100 == 0:
             await limiter.acquire()
-    await flush_data(messages, config.DATA["MESSAGES"], thread.parent, thread)
+            count = 0
     await flush_data(reactions, config.DATA["REACTIONS"])
+    await flush_data(messages, config.DATA["MESSAGES"], thread.parent, thread)
     logger.info(f"> > > done scraping thread {thread} (ID: {thread.id})")
 
 async def scrape_message(message: discord.Message, messages, reactions, limiter: AsyncLimiter):
@@ -193,10 +198,7 @@ async def scrape_message(message: discord.Message, messages, reactions, limiter:
             await scrape_reaction(message, user, reaction, reactions)
             if count % 100 == 0:
                 await limiter.acquire()
-
-    if len(messages["data"]) >= config.SCRAPER["BUFFER_SIZE"]:
-        await flush_data(reactions, config.DATA["REACTIONS"])
-        await flush_data(messages, config.DATA["MESSAGES"], message.channel, message.thread)
+                count = 0
 
 async def scrape_reaction(message: discord.Message, user: Union[discord.Member, discord.User], reaction: discord.Reaction, reactions):
     if user.bot:
@@ -215,6 +217,7 @@ async def flush_data(data, filename, channel=None, thread=None):
     logger.debug(f"flushing to {filename}")
     df.to_csv(filename, mode='w' if header else 'a', index=False, header=header)
     if channel is not None:
-        save_checkpoint(data["data"][-1]["id"], channel.name, thread.name if thread is not None else None)
+        value = df.at[df.created_at.idxmax(), 'id']
+        save_checkpoint(value, channel, thread)
     data["data"] = []
     data["header"] = False
