@@ -10,6 +10,9 @@ import pandas as pd
 
 import config
 
+logger = logging.getLogger(__name__)
+logger.setLevel(config.LOG_LEVEL)
+
 def get_checkpoint(channel, thread=None):
     key = str(channel.id)
     if thread is not None:
@@ -34,9 +37,6 @@ else:
 with open(config.RESOURCES["SKIP_CHANNELS"], "r") as file:
     skip_channels = [s.strip() for s in file.read().split("\n")]
     skip_channels = {s for s in skip_channels if not s.startswith("#") and len(s) != 0}
-
-logger = logging.getLogger(__name__)
-logger.setLevel(config.LOG_LEVEL)
 
 async def scrape_guild(guild: discord.Guild):
     logger.info(f"scraping guild {guild} (ID: {guild.id})")
@@ -125,7 +125,7 @@ async def scrape_channel(channel: discord.TextChannel, messages, reactions, limi
     logger.info(f"> > scraping #{channel} (ID: {channel.id})")
 
     count = 0
-    async for message in channel.history(limit=None, after=get_checkpoint(channel)):
+    async for message in channel.history(limit=None, after=get_checkpoint(channel), oldest_first=True):
         count += 1
         await scrape_message(message, messages, reactions, limiter)
         if (len(messages["data"]) >= config.SCRAPER["BUFFER_SIZE"] or 
@@ -149,7 +149,7 @@ async def scrape_channel(channel: discord.TextChannel, messages, reactions, limi
 async def scrape_thread(thread: discord.Thread, messages, reactions, limiter):
     logger.info(f"> > > scraping thread {thread} (ID: {thread.id})")
     count = 0
-    async for message in thread.history(limit=None, after=get_checkpoint(thread.parent, thread)):
+    async for message in thread.history(limit=None, after=get_checkpoint(thread.parent, thread), oldest_first=True):
         count += 1
         await scrape_message(message, messages, reactions, limiter)
         if (len(messages["data"]) >= config.SCRAPER["BUFFER_SIZE"] or 
